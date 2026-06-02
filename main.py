@@ -38,7 +38,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 from image_io import cv_to_qpixmap, imread_unicode, imwrite_unicode, to_gray
 from operations import OPERATIONS, Operation, ParamSpec, by_category, categories
-from themes import GLOBAL_QSS
+from themes import DEFAULT_THEME, THEMES, THEME_IDS, get_palette, get_qss
 
 
 class Card(QFrame):
@@ -313,8 +313,9 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         self.progress_bar.setRange(0, 0)  # 不确定模式
         self.statusBar().addPermanentWidget(self.progress_bar)
+        self.current_theme: str = DEFAULT_THEME
         self.statusBar().showMessage("就绪")
-        self.setStyleSheet(GLOBAL_QSS)
+        self.setStyleSheet(get_qss(DEFAULT_THEME))
 
     def _build_header(self) -> QWidget:
         header = QFrame()
@@ -335,7 +336,14 @@ class MainWindow(QMainWindow):
 
         course_tag = QLabel("◆  CV  LAB")
         course_tag.setObjectName("courseTag")
+        self.theme_selector = QComboBox()
+        self.theme_selector.setObjectName("themeSelector")
+        for t_name in THEME_IDS:
+            self.theme_selector.addItem(f"🎨 {t_name}", t_name)
+        self.theme_selector.setCurrentText(f"🎨 {DEFAULT_THEME}")
+        self.theme_selector.setToolTip("切换界面主题")
         layout.addLayout(title_box, stretch=1)
+        layout.addWidget(self.theme_selector)
         layout.addWidget(course_tag)
         return header
 
@@ -450,6 +458,7 @@ class MainWindow(QMainWindow):
         self.profile_btn.clicked.connect(self._show_line_profile)
         self.surface_btn.clicked.connect(self._show_3d_surface)
         self.report_btn.clicked.connect(self._export_report)
+        self.theme_selector.currentIndexChanged.connect(self._on_theme_changed)
         self.category_box.currentTextChanged.connect(self._load_operations)
         self.operation_box.currentIndexChanged.connect(self._operation_changed)
         # 历史记录点击回溯
@@ -467,6 +476,21 @@ class MainWindow(QMainWindow):
                           (QKeySequence("Ctrl+Shift+S"), self.save_result)):
             sc = QShortcut(key, self)
             sc.activated.connect(slot)
+
+    def _on_theme_changed(self) -> None:
+        """切换界面主题."""
+        name = self.theme_selector.currentData()
+        if not name or name == self.current_theme:
+            return
+        self.current_theme = name
+        self.setStyleSheet(get_qss(name))
+        # 更新卡片阴影颜色
+        p = get_palette(name)
+        for card in self.findChildren(Card):
+            if card.graphicsEffect():
+                card.graphicsEffect().setColor(
+                    QColor(p.card_shadow_r, p.card_shadow_g, p.card_shadow_b, p.card_shadow_a))
+        self.statusBar().showMessage(f"主题: {name}")
 
     def _on_history_clicked(self, item) -> None:
         """点击历史记录条目，恢复对应的处理结果."""
