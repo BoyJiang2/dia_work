@@ -7,7 +7,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QKeySequence, QPixmap
+from PyQt5.QtGui import QColor, QIcon, QKeySequence, QPixmap
 from PyQt5.QtWidgets import (
     QShortcut,
     QApplication,
@@ -39,6 +39,11 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from image_io import cv_to_qpixmap, imread_unicode, imwrite_unicode, to_gray
 from operations import OPERATIONS, Operation, ParamSpec, by_category, categories
 from themes import DEFAULT_THEME, THEMES, THEME_IDS, get_palette, get_qss
+
+import os as _os
+_ICON_PATH = str(Path(__file__).parent / "app_icon.ico")
+if not Path(_ICON_PATH).exists():
+    _ICON_PATH = str(Path(_os.getcwd()) / "app_icon.ico")
 
 
 class Card(QFrame):
@@ -238,6 +243,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setObjectName("rootWindow")
         self.setWindowTitle("数字图像处理综合实验系统")
+        if Path(_ICON_PATH).exists():
+            self.setWindowIcon(QIcon(_ICON_PATH))
         self.resize(1440, 880)
         self.original: np.ndarray | None = None
         self.result: np.ndarray | None = None

@@ -200,6 +200,52 @@ DARK_NEON = Palette(
 
 
 # ═══════════════════════════════════════════════════════════════
+#  方案 D：Midnight Gold（用户设计稿）
+# ═══════════════════════════════════════════════════════════════
+
+MIDNIGHT_GOLD = Palette(
+    name="Midnight Gold",
+    description="深海蓝 + 香槟金 — 经典沉稳的设计稿风格",
+    bg_deep="#fafaf8",
+    bg_panel="#f4f3ef",
+    bg_card="#ffffff",
+    bg_hover="#f0efe9",
+    bg_input="#fafaf8",
+    bg_canvas="#fafaf8",
+    border="#d8d5cc",
+    border_focus="#3e8abb",
+    text_primary="#1a1e28",
+    text_secondary="#5a5d66",
+    text_muted="#949698",
+    accent="#3e8abb",
+    accent_hover="#559cc9",
+    accent_pressed="#2e6d94",
+    green="#5a9e6f",
+    green_hover="#6db083",
+    teal="#3e8abb",
+    orange="#c4883d",
+    red="#c4554d",
+    btn_primary_bg="#3e8abb",
+    btn_primary_text="#ffffff",
+    btn_accent_bg="#f8c15d",
+    btn_accent_text="#2d2210",
+    btn_secondary_text="#3e8abb",
+    btn_secondary_bg="rgba(62,138,187,0.06)",
+    btn_secondary_border="rgba(62,138,187,0.2)",
+    btn_ghost_text="#5a5d66",
+    btn_ghost_bg="rgba(0,0,0,0.03)",
+    btn_ghost_border="#d8d5cc",
+    topbar_bg="#0f1f32",
+    topbar_border="#1a3148",
+    workspace_bg="#f4f3ef",
+    workspace_border="#d8d5cc",
+    card_shadow_r=0, card_shadow_g=0, card_shadow_b=0, card_shadow_a=18,
+    base_font_size=15,
+    corner_radius=8,
+)
+
+
+# ═══════════════════════════════════════════════════════════════
 #  QSS 生成器
 # ═══════════════════════════════════════════════════════════════
 
@@ -216,8 +262,28 @@ def build_qss(p: Palette) -> str:
     cr = p.corner_radius
     cr_sm = max(4, cr - 4)
 
-    # ── 按钮内的 emoji 在浅色主题下偏暗，统一省略 ──
-    use_icon = _icon_visible_in_theme(p)
+    # Midnight Gold 顶栏特殊处理：深色顶栏 + 金色点缀
+    is_midnight = p is MIDNIGHT_GOLD
+    if is_midnight:
+        title_color = "#f8f4ea"
+        subtitle_color = "#c4b998"
+        tag_color = "#f8c15d"
+        tag_bg = "rgba(248,193,93,0.12)"
+        tag_border = "rgba(248,193,93,0.28)"
+        btn_primary_bg = "#f8c15d"
+        btn_primary_text = "#2d2210"
+        btn_primary_hover = "#fcd580"
+        btn_primary_pressed = "#d9a54a"
+    else:
+        title_color = p.text_primary
+        subtitle_color = p.text_secondary
+        tag_color = p.teal
+        tag_bg = f"{p.teal}14"
+        tag_border = f"{p.teal}33"
+        btn_primary_bg = p.btn_primary_bg
+        btn_primary_text = p.btn_primary_text
+        btn_primary_hover = p.accent_hover
+        btn_primary_pressed = p.accent_pressed
 
     return f"""
 /* ═════ {p.name} ═════ */
@@ -241,25 +307,25 @@ QFrame#topBar {{
 }}
 
 QLabel#appTitle {{
-    color: {p.text_primary};
+    color: {title_color};
     font-size: {fs_xl}px;
     font-weight: 700;
     letter-spacing: 0.5px;
 }}
 
 QLabel#appSubtitle {{
-    color: {p.text_secondary};
+    color: {subtitle_color};
     font-size: {fs_sm}px;
 }}
 
 QLabel#courseTag {{
-    color: {p.teal};
+    color: {tag_color};
     font-weight: 700;
     font-size: {fs_sm}px;
     padding: 6px 12px;
-    border: 1px solid {p.teal}33;
+    border: 1px solid {tag_border};
     border-radius: {cr_sm}px;
-    background: {p.teal}14;
+    background: {tag_bg};
 }}
 
 /* ── 卡片 ── */
@@ -297,12 +363,12 @@ QPushButton {{
 }}
 
 QPushButton#primaryButton {{
-    color: {p.btn_primary_text};
-    background: {p.btn_primary_bg};
-    border-color: {p.btn_primary_bg};
+    color: {btn_primary_text};
+    background: {btn_primary_bg};
+    border-color: {btn_primary_bg};
 }}
-QPushButton#primaryButton:hover {{ background: {p.accent_hover}; }}
-QPushButton#primaryButton:pressed {{ background: {p.accent_pressed}; }}
+QPushButton#primaryButton:hover {{ background: {btn_primary_hover}; }}
+QPushButton#primaryButton:pressed {{ background: {btn_primary_pressed}; }}
 
 QPushButton#accentButton {{
     color: {p.btn_accent_text};
@@ -630,7 +696,7 @@ QComboBox#themeSelector QAbstractItemView {{
 # ═══════════════════════════════════════════════════════════════
 
 THEMES: dict[str, dict] = {}
-for _p in (DARK_PRO, GLASS_LIGHT, DARK_NEON):
+for _p in (MIDNIGHT_GOLD, DARK_PRO, GLASS_LIGHT, DARK_NEON):
     THEMES[_p.name] = {
         "id": _p.name.lower().replace(" ", "_"),
         "name": _p.name,
@@ -640,7 +706,7 @@ for _p in (DARK_PRO, GLASS_LIGHT, DARK_NEON):
     }
 
 THEME_IDS = list(THEMES.keys())
-DEFAULT_THEME = DARK_PRO.name
+DEFAULT_THEME = MIDNIGHT_GOLD.name
 
 
 def get_theme(name: str) -> dict:

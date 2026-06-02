@@ -8,3 +8,7 @@ env/
 *.log
 output/
 Files/
+dist/
+build/
+*.spec
+*.exe
