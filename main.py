@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import datetime
 import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor, QPixmap
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QColor, QKeySequence, QPixmap
 from PyQt5.QtWidgets import (
+    QShortcut,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -21,6 +23,7 @@ from PyQt5.QtWidgets import (
     QListWidget,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -30,6 +33,8 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from matplotlib import pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 from image_io import cv_to_qpixmap, imread_unicode, imwrite_unicode, to_gray
 from operations import OPERATIONS, Operation, ParamSpec, by_category, categories
@@ -55,23 +60,32 @@ class Card(QFrame):
 
 
 class ImageCanvas(QLabel):
+    pixel_hovered = pyqtSignal(int, int, object)  # x, y, pixel_value_or_None
+
     def __init__(self, empty_text: str) -> None:
         super().__init__()
         self.empty_text = empty_text
         self._pixmap: QPixmap | None = None
+        self._image: np.ndarray | None = None  # 保留原始数组用于像素查询
+        self._zoom: float = 1.0  # 缩放因子，1.0 = 适合窗口
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(420, 340)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setObjectName("imageCanvas")
         self.setText(empty_text)
+        self.setMouseTracking(True)
 
     def set_image(self, image: np.ndarray | None) -> None:
         if image is None:
             self._pixmap = None
+            self._image = None
+            self._zoom = 1.0
             self.clear()
             self.setText(self.empty_text)
             return
+        self._image = image
         self._pixmap = cv_to_qpixmap(image)
+        self._zoom = 1.0
         self._rescale()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
@@ -81,8 +95,86 @@ class ImageCanvas(QLabel):
     def _rescale(self) -> None:
         if self._pixmap is None:
             return
-        scaled = self._pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        scaled = self._pixmap
+        if abs(self._zoom - 1.0) < 0.001:
+            # 适应窗口
+            scaled = scaled.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        else:
+            w = int(self._pixmap.width() * self._zoom)
+            h = int(self._pixmap.height() * self._zoom)
+            scaled = scaled.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.setPixmap(scaled)
+
+    def _image_coords(self, pos) -> tuple[int, int] | None:
+        """将控件坐标映射到图像像素坐标."""
+        if self._pixmap is None or self._image is None:
+            return None
+        pix = self.pixmap()
+        if pix is None:
+            return None
+        # 计算显示的偏移
+        ox = (self.width() - pix.width()) // 2
+        oy = (self.height() - pix.height()) // 2
+        ix = pos.x() - ox
+        iy = pos.y() - oy
+        if ix < 0 or iy < 0 or ix >= pix.width() or iy >= pix.height():
+            return None
+        # 映射回原始图像坐标
+        img_h, img_w = self._image.shape[:2]
+        px = int(ix * img_w / pix.width())
+        py = int(iy * img_h / pix.height())
+        return px, py
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        coords = self._image_coords(event.pos())
+        if coords is None:
+            self.pixel_hovered.emit(-1, -1, None)
+            return
+        px, py = coords
+        if self._image is not None and 0 <= py < self._image.shape[0] and 0 <= px < self._image.shape[1]:
+            val = self._image[py, px]
+            self.pixel_hovered.emit(px, py, val)
+        else:
+            self.pixel_hovered.emit(-1, -1, None)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self.pixel_hovered.emit(-1, -1, None)
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        if event.modifiers() & Qt.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self._zoom = min(10.0, self._zoom * 1.15)
+            else:
+                self._zoom = max(0.05, self._zoom / 1.15)
+            # 接近 1.0 时吸附
+            if abs(self._zoom - 1.0) < 0.02:
+                self._zoom = 1.0
+            self._rescale()
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        if self._pixmap is None:
+            return
+        if abs(self._zoom - 1.0) < 0.01:
+            # 当前适应窗口 → 切换到 100% (1:1)
+            self._zoom = 1.0
+            self._rescale()
+            # 计算 100% 需要的缩放（按原始图像尺寸 vs 显示尺寸）
+            # 实际上 100% = 原始像素 1:1 映射
+            img_w = self._pixmap.width()
+            view_w = self.width()
+            if img_w > view_w:
+                self._zoom = 1.0  # 保持原图大小（pixmap 本身就是原图大小）
+            else:
+                self._zoom = 1.0
+            self._rescale()
+        else:
+            # 从缩放状态 → 适应窗口
+            self._zoom = 1.0
+            self._rescale()
 
 
 class ImagePanel(QFrame):
@@ -165,6 +257,7 @@ class MainWindow(QMainWindow):
         self.params_layout.setVerticalSpacing(12)
         self.history = QListWidget()
         self.history.setObjectName("historyList")
+        self._history_data: list[np.ndarray] = []  # 与 history 条目对应的结果图
 
         self.original_view = ImagePanel("原始图像", "INPUT", "打开图像后在这里显示原图")
         self.result_view = ImagePanel("处理结果", "OUTPUT", "执行算法后在这里显示结果")
@@ -213,6 +306,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(shell)
         self.setStatusBar(QStatusBar())
         self.statusBar().setObjectName("status")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximumWidth(200)
+        self.progress_bar.setMaximumHeight(18)
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 0)  # 不确定模式
+        self.statusBar().addPermanentWidget(self.progress_bar)
         self.statusBar().showMessage("就绪")
         self._set_style()
 
@@ -256,6 +355,9 @@ class MainWindow(QMainWindow):
         quick_row.addWidget(self.save_btn)
         quick_row.addWidget(self.reset_btn)
         quick_card.body.addLayout(quick_row)
+        self.batch_btn = QPushButton("批处理")
+        self.batch_btn.setObjectName("ghostButton")
+        quick_card.body.addWidget(self.batch_btn)
         quick_card.body.addWidget(self.path_label)
         layout.addWidget(quick_card)
 
@@ -310,8 +412,24 @@ class MainWindow(QMainWindow):
         title.setObjectName("stageTitle")
         hint = QLabel("左侧选择方法并调节参数，右侧对比处理效果")
         hint.setObjectName("stageHint")
+        self.compare_box = QCheckBox("叠加对比")
+        self.compare_box.setObjectName("compareCheck")
+        self.compare_box.setToolTip("在结果图上半透明叠加原图，便于对比差异")
+        self.profile_btn = QPushButton("剖线图")
+        self.profile_btn.setObjectName("toolBtn")
+        self.profile_btn.setToolTip("查看图像水平/垂直剖线强度图")
+        self.surface_btn = QPushButton("3D视图")
+        self.surface_btn.setObjectName("toolBtn")
+        self.surface_btn.setToolTip("查看图像像素强度的3D曲面图")
+        self.report_btn = QPushButton("导出报告")
+        self.report_btn.setObjectName("toolBtn")
+        self.report_btn.setToolTip("导出HTML实验报告（原图/结果/参数/指标）")
         stage_header.addWidget(title)
         stage_header.addStretch(1)
+        stage_header.addWidget(self.profile_btn)
+        stage_header.addWidget(self.surface_btn)
+        stage_header.addWidget(self.report_btn)
+        stage_header.addWidget(self.compare_box)
         stage_header.addWidget(hint)
         layout.addLayout(stage_header)
 
@@ -419,6 +537,21 @@ class MainWindow(QMainWindow):
                 spacing: 8px;
                 color: #304158;
             }
+            QCheckBox#compareCheck {
+                color: #c8d8ec;
+                spacing: 8px;
+            }
+            QCheckBox#compareCheck::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #5a7590;
+                border-radius: 4px;
+                background: #1d2f44;
+            }
+            QCheckBox#compareCheck::indicator:checked {
+                background: #2aa889;
+                border-color: #2aa889;
+            }
             QScrollArea {
                 background: transparent;
             }
@@ -506,6 +639,34 @@ class MainWindow(QMainWindow):
                 color: #526176;
                 background: transparent;
             }
+            QPushButton#toolBtn {
+                color: #b8cce0;
+                min-height: 24px;
+                max-height: 28px;
+                border: 1px solid #4a6080;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 12px;
+                font-weight: 600;
+                background: rgba(40, 55, 75, 0.7);
+            }
+            QPushButton#toolBtn:hover {
+                background: rgba(60, 90, 130, 0.8);
+                color: white;
+            }
+            QProgressBar {
+                border: 1px solid #c8d4e2;
+                border-radius: 4px;
+                background: #f0f4f8;
+                text-align: center;
+                font-size: 11px;
+                color: #304158;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #1769e0, stop:1 #2aa889);
+                border-radius: 3px;
+            }
             """
         )
 
@@ -514,8 +675,84 @@ class MainWindow(QMainWindow):
         self.save_btn.clicked.connect(self.save_result)
         self.apply_btn.clicked.connect(self.apply_operation)
         self.reset_btn.clicked.connect(self.promote_result)
+        self.batch_btn.clicked.connect(self._batch_process)
+        self.profile_btn.clicked.connect(self._show_line_profile)
+        self.surface_btn.clicked.connect(self._show_3d_surface)
+        self.report_btn.clicked.connect(self._export_report)
         self.category_box.currentTextChanged.connect(self._load_operations)
         self.operation_box.currentIndexChanged.connect(self._operation_changed)
+        # 历史记录点击回溯
+        self.history.itemClicked.connect(self._on_history_clicked)
+        # 叠加对比
+        self.compare_box.stateChanged.connect(self._on_compare_toggled)
+        # 像素探查
+        self.original_view.canvas.pixel_hovered.connect(self._on_original_hover)
+        self.result_view.canvas.pixel_hovered.connect(self._on_result_hover)
+        # 键盘快捷键
+        for key, slot in ((QKeySequence.Open, self.open_image),
+                          (QKeySequence.Save, self.save_result),
+                          (QKeySequence("Ctrl+Return"), self.apply_operation),
+                          (QKeySequence("Ctrl+R"), self.promote_result),
+                          (QKeySequence("Ctrl+Shift+S"), self.save_result)):
+            sc = QShortcut(key, self)
+            sc.activated.connect(slot)
+
+    def _on_history_clicked(self, item) -> None:
+        """点击历史记录条目，恢复对应的处理结果."""
+        idx = self.history.row(item)
+        if 0 <= idx < len(self._history_data):
+            self.result = self._history_data[idx].copy()
+            if self.compare_box.isChecked():
+                self._on_compare_toggled()
+            else:
+                self.result_view.set_image(self.result)
+            self._update_metrics()
+            self.statusBar().showMessage(f"已回溯: {item.text()[:60]}")
+
+    def _on_compare_toggled(self) -> None:
+        """切换叠加对比模式：在结果图上 50% 叠加原图."""
+        if self.compare_box.isChecked() and self.original is not None and self.result is not None:
+            # 确保尺寸一致
+            orig = self.original
+            res = self.result
+            if orig.shape[:2] != res.shape[:2]:
+                res = cv2.resize(res, (orig.shape[1], orig.shape[0]))
+            if orig.ndim != res.ndim:
+                if orig.ndim == 2:
+                    orig = cv2.cvtColor(orig, cv2.COLOR_GRAY2BGR)
+                if res.ndim == 2:
+                    res = cv2.cvtColor(res, cv2.COLOR_GRAY2BGR)
+            blended = cv2.addWeighted(orig, 0.5, res, 0.5, 0)
+            self.result_view.set_image(blended)
+            self.statusBar().showMessage("叠加对比：原图 50% + 结果 50%")
+        else:
+            if self.result is not None:
+                self.result_view.set_image(self.result)
+                self.statusBar().showMessage("对比模式关闭")
+
+    def _on_original_hover(self, x: int, y: int, val) -> None:
+        if val is None:
+            return
+        if isinstance(val, np.ndarray):
+            if val.size == 1:
+                self.statusBar().showMessage(f"原图 ({x},{y}) = {int(val.flat[0])}")
+            else:
+                b, g, r = int(val[0]), int(val[1]), int(val[2])
+                self.statusBar().showMessage(f"原图 ({x},{y}) BGR=({b},{g},{r})")
+        else:
+            self.statusBar().showMessage(f"原图 ({x},{y}) = {int(val)}")
+
+    def _on_result_hover(self, x: int, y: int, val) -> None:
+        if val is None:
+            return
+        if isinstance(val, np.ndarray):
+            if val.size == 1:
+                self.statusBar().showMessage(f"结果 ({x},{y}) = {int(val.flat[0])}")
+            else:
+                b, g, r = int(val[0]), int(val[1]), int(val[2])
+                self.statusBar().showMessage(f"结果 ({x},{y}) BGR=({b},{g},{r})")
+        else:
+            self.statusBar().showMessage(f"结果 ({x},{y}) = {int(val)}")
 
     def _load_categories(self) -> None:
         self.category_box.clear()
@@ -617,6 +854,7 @@ class MainWindow(QMainWindow):
         self.original_view.set_image(self.original)
         self.result_view.set_image(None)
         self.history.clear()
+        self._history_data.clear()
         self.path_label.setText(str(path))
         self.statusBar().showMessage(f"已载入 {path}")
         self._update_metrics()
@@ -651,9 +889,18 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "处理失败", str(exc))
             return
-        self.result_view.set_image(self.result)
+        if self.compare_box.isChecked():
+            self._on_compare_toggled()
+        else:
+            self.result_view.set_image(self.result)
         if add_history:
-            self.history.insertItem(0, f"{self.current_operation.category} / {self.current_operation.name}  {params}")
+            desc = f"{self.current_operation.category} / {self.current_operation.name}  {params}"
+            self.history.insertItem(0, desc)
+            self._history_data.insert(0, self.result.copy())
+            # 限制历史记录数量
+            if len(self._history_data) > 50:
+                self._history_data.pop()
+                self.history.takeItem(self.history.count() - 1)
         self._update_metrics()
         self.statusBar().showMessage("处理完成")
 
@@ -703,6 +950,243 @@ class MainWindow(QMainWindow):
         cov = float(((af - mu_a) * (bf - mu_b)).mean())
         ssim = ((2 * mu_a * mu_b + c1) * (2 * cov + c2)) / ((mu_a**2 + mu_b**2 + c1) * (var_a + var_b + c2))
         return mse, psnr, float(np.clip(ssim, -1.0, 1.0))
+
+    # ---- 批处理 ----
+
+    def _batch_process(self) -> None:
+        """对文件夹内所有图片执行当前算法并保存结果."""
+        if self.original is None:
+            QMessageBox.information(self, "提示", "请先打开一张图片以选择操作和参数。")
+            return
+        folder = QFileDialog.getExistingDirectory(self, "选择包含图像的文件夹", str(Path.cwd()))
+        if not folder:
+            return
+        folder = Path(folder)
+        exts = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
+        images = sorted([p for p in folder.iterdir() if p.suffix.lower() in exts])
+        if not images:
+            QMessageBox.information(self, "提示", f"文件夹中没有找到图像文件。")
+            return
+
+        out_dir = folder / f"batch_{self.current_operation.key}_{datetime.datetime.now():%Y%m%d_%H%M%S}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, len(images))
+        self.progress_bar.setValue(0)
+        self.statusBar().showMessage(f"批处理 0/{len(images)}...")
+
+        op = self.current_operation
+        params = self._params()
+
+        for i, img_path in enumerate(images):
+            try:
+                img = imread_unicode(str(img_path))
+                result = op.apply(img.copy(), params)
+                out_path = out_dir / f"{img_path.stem}_{op.key}{img_path.suffix}"
+                imwrite_unicode(str(out_path), result)
+            except Exception as exc:
+                QMessageBox.warning(self, "批处理警告", f"处理 {img_path.name} 失败:\n{exc}")
+            self.progress_bar.setValue(i + 1)
+            self.statusBar().showMessage(f"批处理 {i + 1}/{len(images)}: {img_path.name}")
+            QApplication.processEvents()
+
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 0)
+        self.statusBar().showMessage(f"批处理完成，结果保存在 {out_dir}")
+
+    # ---- 剖线图 ----
+
+    def _show_line_profile(self) -> None:
+        """显示当前图像（原始或结果）的水平/垂直剖线强度图."""
+        target = self.result if self.result is not None else self.original
+        if target is None:
+            QMessageBox.information(self, "提示", "请先打开图像。")
+            return
+        image = target
+        gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        h, w = gray.shape
+
+        cy, cx = h // 2, w // 2
+
+        fig, axes = plt.subplots(2, 2, figsize=(12, 9), num="剖线图")
+
+        # 原图 + 十字线
+        ax_img = axes[0, 0]
+        ax_img.imshow(gray, cmap="gray")
+        ax_img.axhline(cy, color="r", linewidth=1)
+        ax_img.axvline(cx, color="r", linewidth=1)
+        ax_img.set_title(f"Image {w}x{h} (crosshair at center)")
+        ax_img.set_xlabel("X")
+        ax_img.set_ylabel("Y")
+
+        # 水平剖线
+        ax_h = axes[0, 1]
+        ax_h.plot(range(w), gray[cy, :], "b-", linewidth=0.8)
+        ax_h.axvline(cx, color="r", linestyle="--", linewidth=0.5)
+        ax_h.set_title(f"Horizontal profile at y={cy}")
+        ax_h.set_xlabel("X (pixel)")
+        ax_h.set_ylabel("Intensity")
+        ax_h.set_xlim(0, w)
+        ax_h.grid(True, alpha=0.3)
+
+        # 垂直剖线
+        ax_v = axes[1, 0]
+        ax_v.plot(gray[:, cx], range(h), "g-", linewidth=0.8)
+        ax_v.axhline(cy, color="r", linestyle="--", linewidth=0.5)
+        ax_v.set_title(f"Vertical profile at x={cx}")
+        ax_v.set_xlabel("Intensity")
+        ax_v.set_ylabel("Y (pixel)")
+        ax_v.set_ylim(h, 0)
+        ax_v.grid(True, alpha=0.3)
+
+        # 直方图
+        ax_hist = axes[1, 1]
+        ax_hist.hist(gray.ravel(), bins=64, color="steelblue", edgecolor="none", alpha=0.85)
+        ax_hist.set_title("Histogram")
+        ax_hist.set_xlabel("Intensity")
+        ax_hist.set_ylabel("Frequency")
+        ax_hist.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.show()
+
+    # ---- 3D 曲面图 ----
+
+    def _show_3d_surface(self) -> None:
+        """显示当前图像的3D像素强度曲面图."""
+        target = self.result if self.result is not None else self.original
+        if target is None:
+            QMessageBox.information(self, "提示", "请先打开图像。")
+            return
+        image = target
+        gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        # 对较大图像降采样
+        max_dim = 256
+        h, w = gray.shape
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            h, w = gray.shape
+
+        fig = plt.figure(figsize=(12, 9), num="3D曲面图")
+        ax = fig.add_subplot(111, projection="3d")
+
+        X, Y = np.meshgrid(range(w), range(h))
+        ax.plot_surface(X, Y, gray, cmap="terrain", linewidth=0, antialiased=True, alpha=0.92)
+        ax.set_title(f"3D Intensity Surface ({w}x{h})")
+        ax.set_xlabel("X (pixel)")
+        ax.set_ylabel("Y (pixel)")
+        ax.set_zlabel("Intensity")
+        ax.view_init(elev=35, azim=-60)
+
+        # 添加底部投影
+        ax.contourf(X, Y, gray, zdir="z", offset=gray.min() - 30, cmap="terrain", alpha=0.5)
+
+        plt.tight_layout()
+        plt.show()
+
+    # ---- 报告导出 ----
+
+    def _export_report(self) -> None:
+        """导出 HTML 实验报告."""
+        if self.original is None:
+            QMessageBox.information(self, "提示", "请先打开图像。")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存 HTML 报告", str(Path.cwd() / "report.html"), "HTML (*.html)")
+        if not path:
+            return
+
+        # 将图像编码为 base64
+        import base64
+
+        def img_to_b64(img: np.ndarray) -> str:
+            if img.ndim == 2:
+                disp = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            else:
+                disp = img
+            ok, enc = cv2.imencode(".png", disp)
+            if ok:
+                return base64.b64encode(enc.tobytes()).decode()
+            return ""
+
+        orig_b64 = img_to_b64(self.original)
+        result_b64 = img_to_b64(self.result) if self.result is not None else ""
+
+        # 收集质量指标
+        gray = cv2.cvtColor(self.original, cv2.COLOR_BGR2GRAY) if self.original.ndim == 3 else self.original
+        mean_val = f"{gray.mean():.2f}"
+        std_val = f"{gray.std():.2f}"
+        mse_val, psnr_val, ssim_val = ("-", "-", "-")
+        if self.result is not None:
+            mse_val, psnr_val, ssim_val = self._diff_metrics(self.original, self.result)
+            mse_val = f"{mse_val:.2f}"
+            ssim_val = f"{ssim_val:.4f}"
+
+        params = self._params() if self.result is not None else {}
+        params_html = "<br>".join(f"{k} = {v}" for k, v in params.items()) or "无"
+
+        html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>数字图像处理实验报告</title>
+<style>
+  body {{ font-family: "Microsoft YaHei", sans-serif; max-width: 1100px; margin: 30px auto; padding: 20px; background: #f5f7fa; color: #222; }}
+  h1 {{ text-align: center; color: #0f3d68; }}
+  .meta {{ text-align: center; color: #666; font-size: 13px; margin-bottom: 30px; }}
+  .section {{ background: white; border-radius: 10px; padding: 20px; margin: 18px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }}
+  .section h2 {{ color: #1c6aa6; margin-top: 0; border-bottom: 2px solid #e0e8f0; padding-bottom: 8px; }}
+  .images {{ display: flex; gap: 20px; flex-wrap: wrap; }}
+  .img-card {{ flex: 1; min-width: 300px; text-align: center; }}
+  .img-card img {{ max-width: 100%; border-radius: 6px; border: 1px solid #ddd; }}
+  .img-card p {{ color: #555; font-weight: 600; }}
+  table {{ border-collapse: collapse; width: 100%; }}
+  td, th {{ border: 1px solid #dde; padding: 8px 12px; text-align: left; }}
+  th {{ background: #f0f5fa; color: #1c6aa6; }}
+  .footer {{ text-align: center; color: #999; font-size: 12px; margin-top: 40px; }}
+</style>
+</head>
+<body>
+<h1>数字图像处理实验报告</h1>
+<div class="meta">
+  生成时间: {datetime.datetime.now():%Y-%m-%d %H:%M:%S} &nbsp;|&nbsp;
+  文件: {self.current_path.name if self.current_path else "无"} &nbsp;|&nbsp;
+  算法: {self.current_operation.category} / {self.current_operation.name}
+</div>
+<div class="section">
+  <h2>算法信息</h2>
+  <table>
+    <tr><th>类别</th><td>{self.current_operation.category}</td></tr>
+    <tr><th>方法</th><td>{self.current_operation.name}</td></tr>
+    <tr><th>说明</th><td>{self.current_operation.description}</td></tr>
+    <tr><th>参数</th><td>{params_html}</td></tr>
+  </table>
+</div>
+<div class="section">
+  <h2>图像对比</h2>
+  <div class="images">
+    <div class="img-card"><p>原始图像</p><img src="data:image/png;base64,{orig_b64}" alt="original"></div>
+    {"<div class='img-card'><p>处理结果</p><img src='data:image/png;base64," + result_b64 + "' alt='result'></div>" if result_b64 else "<div class='img-card'><p>处理结果</p><p style='color:#999;'>未执行处理</p></div>"}
+  </div>
+</div>
+<div class="section">
+  <h2>质量指标</h2>
+  <table>
+    <tr><th>平均灰度</th><td>{mean_val}</td><th>标准差</th><td>{std_val}</td></tr>
+    <tr><th>MSE</th><td>{mse_val}</td><th>PSNR</th><td>{psnr_val}</td></tr>
+    <tr><th>SSIM</th><td colspan="3">{ssim_val}</td></tr>
+  </table>
+</div>
+<div class="footer">数字图像处理综合实验系统 &copy; 2026</div>
+</body>
+</html>"""
+
+        Path(path).write_text(html, encoding="utf-8")
+        self.statusBar().showMessage(f"报告已保存: {path}")
 
 
 def main() -> int:
