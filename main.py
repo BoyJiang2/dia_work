@@ -38,6 +38,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 from image_io import cv_to_qpixmap, imread_unicode, imwrite_unicode, to_gray
 from operations import OPERATIONS, Operation, ParamSpec, by_category, categories
+from themes import GLOBAL_QSS
 
 
 class Card(QFrame):
@@ -45,9 +46,9 @@ class Card(QFrame):
         super().__init__()
         self.setObjectName("card")
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(22)
-        shadow.setOffset(0, 8)
-        shadow.setColor(QColor(31, 50, 72, 34))
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 80))
         self.setGraphicsEffect(shadow)
 
         self.body = QVBoxLayout(self)
@@ -276,13 +277,13 @@ class MainWindow(QMainWindow):
         self._update_metrics()
 
     def _build_ui(self) -> None:
-        self.open_btn = QPushButton("打开图像")
+        self.open_btn = QPushButton("📂  打开图像")
         self.open_btn.setObjectName("primaryButton")
-        self.save_btn = QPushButton("保存结果")
+        self.save_btn = QPushButton("💾  保存结果")
         self.save_btn.setObjectName("secondaryButton")
-        self.apply_btn = QPushButton("执行处理")
+        self.apply_btn = QPushButton("▶  执行处理")
         self.apply_btn.setObjectName("accentButton")
-        self.reset_btn = QPushButton("结果作为原图")
+        self.reset_btn = QPushButton("↻  结果作为原图")
         self.reset_btn.setObjectName("ghostButton")
         self.auto_apply_box = QCheckBox("参数变化时自动预览")
         self.auto_apply_box.setChecked(True)
@@ -313,7 +314,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 0)  # 不确定模式
         self.statusBar().addPermanentWidget(self.progress_bar)
         self.statusBar().showMessage("就绪")
-        self._set_style()
+        self.setStyleSheet(GLOBAL_QSS)
 
     def _build_header(self) -> QWidget:
         header = QFrame()
@@ -332,7 +333,7 @@ class MainWindow(QMainWindow):
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
 
-        course_tag = QLabel("CV LAB")
+        course_tag = QLabel("◆  CV  LAB")
         course_tag.setObjectName("courseTag")
         layout.addLayout(title_box, stretch=1)
         layout.addWidget(course_tag)
@@ -355,7 +356,7 @@ class MainWindow(QMainWindow):
         quick_row.addWidget(self.save_btn)
         quick_row.addWidget(self.reset_btn)
         quick_card.body.addLayout(quick_row)
-        self.batch_btn = QPushButton("批处理")
+        self.batch_btn = QPushButton("📦  批处理")
         self.batch_btn.setObjectName("ghostButton")
         quick_card.body.addWidget(self.batch_btn)
         quick_card.body.addWidget(self.path_label)
@@ -415,13 +416,13 @@ class MainWindow(QMainWindow):
         self.compare_box = QCheckBox("叠加对比")
         self.compare_box.setObjectName("compareCheck")
         self.compare_box.setToolTip("在结果图上半透明叠加原图，便于对比差异")
-        self.profile_btn = QPushButton("剖线图")
+        self.profile_btn = QPushButton("📈 剖线图")
         self.profile_btn.setObjectName("toolBtn")
         self.profile_btn.setToolTip("查看图像水平/垂直剖线强度图")
-        self.surface_btn = QPushButton("3D视图")
+        self.surface_btn = QPushButton("⛰ 3D视图")
         self.surface_btn.setObjectName("toolBtn")
         self.surface_btn.setToolTip("查看图像像素强度的3D曲面图")
-        self.report_btn = QPushButton("导出报告")
+        self.report_btn = QPushButton("📄 导出报告")
         self.report_btn.setObjectName("toolBtn")
         self.report_btn.setToolTip("导出HTML实验报告（原图/结果/参数/指标）")
         stage_header.addWidget(title)
@@ -439,236 +440,6 @@ class MainWindow(QMainWindow):
         image_row.addWidget(self.result_view, stretch=1)
         layout.addLayout(image_row, stretch=1)
         return workspace
-
-    def _set_style(self) -> None:
-        self.setStyleSheet(
-            """
-            QWidget {
-                font-family: "Microsoft YaHei UI", "Segoe UI", Arial;
-                font-size: 14px;
-                color: #18202f;
-            }
-            QMainWindow#rootWindow, QWidget#appShell {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #edf3ff, stop:0.45 #f7fbff, stop:1 #eef7f4);
-            }
-            QFrame#topBar {
-                border: 1px solid rgba(255,255,255,0.72);
-                border-radius: 12px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #0f3d68, stop:0.52 #1c6aa6, stop:1 #2aa889);
-            }
-            QLabel#appTitle {
-                color: white;
-                font-size: 25px;
-                font-weight: 700;
-                letter-spacing: 0px;
-            }
-            QLabel#appSubtitle {
-                color: rgba(255,255,255,0.78);
-                font-size: 13px;
-            }
-            QLabel#courseTag {
-                color: white;
-                font-weight: 700;
-                padding: 8px 14px;
-                border: 1px solid rgba(255,255,255,0.38);
-                border-radius: 8px;
-                background: rgba(255,255,255,0.14);
-            }
-            QFrame#card {
-                border: 1px solid rgba(201, 212, 226, 0.72);
-                border-radius: 8px;
-                background: rgba(255, 255, 255, 0.92);
-            }
-            QLabel#cardTitle {
-                color: #1d2b3f;
-                font-size: 15px;
-                font-weight: 700;
-            }
-            QLabel#description, QLabel#pathLabel {
-                color: #65748a;
-                line-height: 1.4;
-                padding: 8px 10px;
-                border-radius: 8px;
-                background: #f3f7fb;
-            }
-            QPushButton {
-                min-height: 36px;
-                border: 0;
-                border-radius: 8px;
-                padding: 8px 13px;
-                font-weight: 650;
-            }
-            QPushButton#primaryButton {
-                color: white;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #1769e0, stop:1 #20a4a6);
-            }
-            QPushButton#accentButton {
-                color: white;
-                min-height: 42px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #f06a3d, stop:1 #db2f6f);
-            }
-            QPushButton#secondaryButton {
-                color: #17567f;
-                background: #e7f2fb;
-                border: 1px solid #bdd9ed;
-            }
-            QPushButton#ghostButton {
-                color: #3a4b61;
-                background: #f0f4f8;
-                border: 1px solid #d8e0e8;
-            }
-            QComboBox, QSpinBox, QDoubleSpinBox {
-                min-height: 32px;
-                border: 1px solid #c8d4e2;
-                border-radius: 8px;
-                padding: 4px 9px;
-                background: white;
-                selection-background-color: #1c6aa6;
-            }
-            QComboBox::drop-down {
-                width: 26px;
-                border: 0;
-            }
-            QCheckBox {
-                spacing: 8px;
-                color: #304158;
-            }
-            QCheckBox#compareCheck {
-                color: #c8d8ec;
-                spacing: 8px;
-            }
-            QCheckBox#compareCheck::indicator {
-                width: 16px;
-                height: 16px;
-                border: 1px solid #5a7590;
-                border-radius: 4px;
-                background: #1d2f44;
-            }
-            QCheckBox#compareCheck::indicator:checked {
-                background: #2aa889;
-                border-color: #2aa889;
-            }
-            QScrollArea {
-                background: transparent;
-            }
-            QFrame#workspace {
-                border-radius: 12px;
-                border: 1px solid rgba(37, 54, 76, 0.18);
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #172130, stop:0.5 #1d2f44, stop:1 #173d41);
-            }
-            QLabel#stageTitle {
-                color: #f4f8ff;
-                font-size: 18px;
-                font-weight: 700;
-            }
-            QLabel#stageHint {
-                color: #9fb1c8;
-                font-size: 13px;
-            }
-            QFrame#imagePanel {
-                border: 1px solid rgba(197, 214, 232, 0.18);
-                border-radius: 10px;
-                background: rgba(10, 16, 25, 0.34);
-            }
-            QLabel#imageTitle {
-                color: #f2f7ff;
-                font-size: 15px;
-                font-weight: 700;
-            }
-            QLabel#imageBadge {
-                color: #7ee4cf;
-                font-size: 11px;
-                font-weight: 800;
-                padding: 3px 7px;
-                border-radius: 6px;
-                background: rgba(126, 228, 207, 0.12);
-                border: 1px solid rgba(126, 228, 207, 0.24);
-            }
-            QLabel#imageMeta {
-                color: #9eb0c5;
-                font-size: 12px;
-            }
-            QLabel#imageCanvas {
-                color: #aebed2;
-                border: 1px dashed rgba(178, 197, 218, 0.24);
-                border-radius: 8px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #101722, stop:0.55 #162233, stop:1 #0e1e23);
-            }
-            QFrame#metricChip {
-                border: 1px solid #dbe4ee;
-                border-radius: 8px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #ffffff, stop:1 #f0f7fb);
-            }
-            QLabel#metricName {
-                color: #748398;
-                font-size: 12px;
-            }
-            QLabel#metricValue {
-                color: #14233a;
-                font-size: 16px;
-                font-weight: 750;
-            }
-            QListWidget#historyList {
-                min-height: 110px;
-                border: 1px solid #d7e0ea;
-                border-radius: 8px;
-                background: #fbfdff;
-                padding: 6px;
-            }
-            QListWidget#historyList::item {
-                padding: 8px;
-                border-radius: 6px;
-                color: #33445a;
-            }
-            QListWidget#historyList::item:selected {
-                color: white;
-                background: #1c6aa6;
-            }
-            QSplitter::handle {
-                background: transparent;
-                width: 10px;
-            }
-            QStatusBar#status {
-                color: #526176;
-                background: transparent;
-            }
-            QPushButton#toolBtn {
-                color: #b8cce0;
-                min-height: 24px;
-                max-height: 28px;
-                border: 1px solid #4a6080;
-                border-radius: 6px;
-                padding: 4px 10px;
-                font-size: 12px;
-                font-weight: 600;
-                background: rgba(40, 55, 75, 0.7);
-            }
-            QPushButton#toolBtn:hover {
-                background: rgba(60, 90, 130, 0.8);
-                color: white;
-            }
-            QProgressBar {
-                border: 1px solid #c8d4e2;
-                border-radius: 4px;
-                background: #f0f4f8;
-                text-align: center;
-                font-size: 11px;
-                color: #304158;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #1769e0, stop:1 #2aa889);
-                border-radius: 3px;
-            }
-            """
-        )
 
     def _connect(self) -> None:
         self.open_btn.clicked.connect(self.open_image)
